@@ -931,8 +931,33 @@ async function reverseGeocode(lat, lon) {
 // Tries Mapbox (traffic-aware, accurate) when a token is present.
 // Falls back to OSRM (free, no key, ~25% slower estimates).
 
+// Build a cumulative-seconds array from per-segment annotation durations.
+// Returns [0, d0, d0+d1, ...] with one entry per geometry coordinate.
+function buildCumTime(annotationDurations, coordCount) {
+  const cum = [0];
+  const durs = annotationDurations || [];
+  for (let i = 0; i < durs.length; i++) cum.push(cum[cum.length - 1] + (durs[i] || 0));
+  // Pad to coordCount if annotation is shorter (shouldn't happen but safety net)
+  while (cum.length < coordCount) cum.push(cum[cum.length - 1]);
+  return cum;
+}
+
+// For OSRM-based times: apply a highway speed correction.
+// OSRM uses conservative speed-limit-based times; real I-10/interstate driving
+// runs ~70-75 mph, not the 53 mph OSRM implies for long routes.
+function osrmSpeedCorrect(distanceM, durationS) {
+  const miles = distanceM / 1609.344;
+  const osrmMph = miles / (durationS / 3600);
+  // Only correct if it looks like a highway route (long + suspiciously slow average)
+  if (miles > 40 && osrmMph < 62) {
+    // Target ~68 mph for mixed highway/city; edges of route are slower city driving
+    const targetMph = Math.min(68, 55 + miles / 30); // caps around 68 mph for 400+ mile routes
+    return (miles / targetMph) * 3600;
+  }
+  return durationS;
+}
+
 async function getRouteMapbox(from, to, token) {
-  // driving-traffic profile uses real-time traffic when departure_time is "now"
   const coords = `${from.lon},${from.lat};${to.lon},${to.lat}`;
   const url = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coords}`
     + `?access_token=${token}&geometries=geojson&overview=full&annotations=duration,distance`;
@@ -941,24 +966,36 @@ async function getRouteMapbox(from, to, token) {
   const j = await r.json();
   if (!j.routes || !j.routes.length) throw new Error('Mapbox: no route found.');
   const route = j.routes[0];
+  const routeCoords = route.geometry.coordinates;
+  const annDurs = route.legs[0]?.annotation?.duration || [];
   return {
     distanceM: route.distance,
     durationS: route.duration,
-    coords: route.geometry.coordinates,
+    coords: routeCoords,
+    cumTime: buildCumTime(annDurs, routeCoords.length),
     source: 'mapbox',
   };
 }
 
 async function getRouteOSRM(from, to) {
-  const url = `https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson`;
+  const url = `https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson&annotations=duration`;
   const r = await fetch(url);
   const j = await r.json();
   if (j.code !== 'Ok') throw new Error('Routing failed. Check city names.');
   const route = j.routes[0];
+  const routeCoords = route.geometry.coordinates;
+  const annDurs = route.legs[0]?.annotation?.duration || [];
+  const rawCum = buildCumTime(annDurs, routeCoords.length);
+  // Apply speed correction: scale cumTime array so total matches corrected duration
+  const rawTotal = rawCum[rawCum.length - 1] || route.duration;
+  const corrected = osrmSpeedCorrect(route.distance, route.duration);
+  const scale = rawTotal > 0 ? corrected / rawTotal : 1;
+  const cumTime = rawCum.map(t => t * scale);
   return {
     distanceM: route.distance,
-    durationS: route.duration,
-    coords: route.geometry.coordinates,
+    durationS: corrected,
+    coords: routeCoords,
+    cumTime,
     source: 'osrm',
   };
 }
@@ -975,14 +1012,13 @@ async function getRoute(from, to) {
 }
 
 // ── Sample waypoints along route ─────────────────────────
-function sampleWaypoints(coords, n) {
-  // Always include first and last
+function sampleWaypoints(coords, cumTime, n) {
   const pts = [];
   const step = (coords.length - 1) / (n - 1);
   for (let i = 0; i < n; i++) {
-    const idx = Math.round(i * step);
-    const c = coords[Math.min(idx, coords.length-1)];
-    pts.push({ lon: c[0], lat: c[1] });
+    const idx = Math.min(Math.round(i * step), coords.length - 1);
+    const c = coords[idx];
+    pts.push({ lon: c[0], lat: c[1], cumSec: cumTime ? cumTime[idx] : null });
   }
   return pts;
 }
@@ -1169,11 +1205,11 @@ async function run() {
     // 2. Route
     setStatus(mapboxToken ? 'Fetching route via Mapbox (traffic-aware)…' : 'Fetching route via OSRM…');
     const route = await getRoute(fromGeo, toGeo);
-    const { distanceM, durationS, coords } = route;
+    const { distanceM, durationS, coords, cumTime } = route;
 
     // 3. Sample waypoints
     setStatus('Sampling waypoints along route…');
-    const rawWps = sampleWaypoints(coords, n);
+    const rawWps = sampleWaypoints(coords, cumTime, n);
 
     // 4. Reverse geocode waypoints (in parallel, throttled)
     setStatus('Naming waypoints…');
@@ -1186,10 +1222,12 @@ async function run() {
       names.push(await reverseGeocode(rawWps[i].lat, rawWps[i].lon));
     }
 
-    // 5. Calculate ETA at each waypoint
+    // 5. Calculate ETA at each waypoint using annotation-based cumulative time
+    // (falls back to linear interpolation if cumTime wasn't available)
     const waypoints = rawWps.map((wp, i) => {
-      const fracDist = i / (rawWps.length - 1);
-      const etaSec = durationS * fracDist;
+      const etaSec = wp.cumSec !== null
+        ? wp.cumSec
+        : durationS * (i / (rawWps.length - 1));
       const time = new Date(departTime.getTime() + etaSec * 1000);
       return { ...wp, name: names[i], time };
     });
@@ -1213,7 +1251,9 @@ async function run() {
     document.getElementById('rTime').textContent = fmtDur(durationS);
     document.getElementById('rDepart').textContent = fmtTime(departTime);
     document.getElementById('rArrive').textContent = fmtTime(waypoints[waypoints.length-1].time);
-    document.getElementById('rSource').textContent = route.source === 'mapbox' ? '🗺 Mapbox (traffic)' : 'OSRM (no traffic)';
+    document.getElementById('rSource').textContent = route.source === 'mapbox'
+      ? '🗺 Mapbox (traffic)'
+      : 'OSRM + speed correction';
     document.getElementById('routeBar').classList.add('show');
     document.getElementById('shareRow').style.display = 'flex';
 
