@@ -1355,7 +1355,7 @@ function showFrame(idx) {
   const f = _radarFrames[idx];
 
   if (_radarTile) { _radarMap.removeLayer(_radarTile); _radarTile = null; }
-  _radarTile = L.tileLayer(`${f.host}${f.path}/{z}/{x}/{y}/2/1_1.png`, {
+  _radarTile = L.tileLayer(`${f.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`, {
     opacity: 0.65, maxZoom: 12, tileSize: 256,
   }).addTo(_radarMap);
 
