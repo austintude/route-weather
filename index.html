@@ -575,14 +575,13 @@
     <a href="https://tally.so/r/routeweather-pro" target="_blank" class="pro-btn">⚡ Go Pro — free early access</a>
   </header>
 
-  <!-- API Key notice -->
+  <!-- Routing key notice -->
   <div class="key-notice" id="keyNotice">
-    ⚡ Free weather data via <strong>Open-Meteo</strong> (no key needed) + geocoding via Nominatim.<br>
-    For route routing, this uses the <strong>OSRM</strong> open routing API — free, no key.<br>
-    <em>Optional: add an <a href="https://openweathermap.org/api" target="_blank">OpenWeatherMap</a> API key for richer forecasts.</em>
+    🗺️ <strong>Routing:</strong> using <span id="routingLabel">OSRM (free, no key)</span> &nbsp;·&nbsp; <strong>Weather:</strong> Open-Meteo (free, no key)<br>
+    <em>Add a free <a href="https://account.mapbox.com/access-tokens/" target="_blank">Mapbox token</a> for traffic-aware routing (much more accurate ETAs).</em>
     <div class="key-field">
-      <input type="text" id="owmKey" placeholder="OWM key (optional — leave blank to use Open-Meteo)" />
-      <button class="key-save-btn" onclick="saveKey()">Save</button>
+      <input type="text" id="mapboxToken" placeholder="pk.eyJ1… — Mapbox public token (optional, free at mapbox.com)" />
+      <button class="key-save-btn" onclick="saveMapboxToken()">Save</button>
     </div>
   </div>
 
@@ -628,6 +627,7 @@
     <div class="rstat"><div class="rstat-label">Est. drive time</div><div class="rstat-val" id="rTime">—</div></div>
     <div class="rstat"><div class="rstat-label">Departure</div><div class="rstat-val" id="rDepart">—</div></div>
     <div class="rstat"><div class="rstat-label">Arrival</div><div class="rstat-val" id="rArrive">—</div></div>
+    <div class="rstat"><div class="rstat-label">Routing via</div><div class="rstat-val" id="rSource" style="font-size:13px;opacity:0.7">—</div></div>
   </div>
 
   <!-- Drive summary insight card -->
@@ -658,8 +658,19 @@
 
 <script>
 // ── State ─────────────────────────────────────────────────
-let owmKey = localStorage.getItem('owmKey') || '';
-if(owmKey) document.getElementById('owmKey').value = owmKey;
+let mapboxToken = localStorage.getItem('mapboxToken') || '';
+if (mapboxToken) {
+  document.getElementById('mapboxToken').value = mapboxToken;
+  document.getElementById('routingLabel').textContent = 'Mapbox (traffic-aware ✓)';
+}
+
+function saveMapboxToken() {
+  mapboxToken = document.getElementById('mapboxToken').value.trim();
+  localStorage.setItem('mapboxToken', mapboxToken);
+  document.getElementById('routingLabel').textContent = mapboxToken
+    ? 'Mapbox (traffic-aware ✓)' : 'OSRM (free, no key)';
+  showToast(mapboxToken ? 'Mapbox token saved ✓' : 'Token cleared — using OSRM');
+}
 
 // Pro status (Phase 3 will verify server-side; for now localStorage flag)
 const isPro = localStorage.getItem('routeWeatherPro') === 'valid';
@@ -693,12 +704,6 @@ function showToast(msg) {
   setTimeout(() => t.classList.remove('show'), 2200);
 }
 
-function saveKey() {
-  owmKey = document.getElementById('owmKey').value.trim();
-  localStorage.setItem('owmKey', owmKey);
-  showMsg('Key saved ✓', false);
-  setTimeout(()=>{ document.getElementById('msgBox').classList.remove('show'); }, 2000);
-}
 
 // Set default depart to now + 5 min
 (function(){
@@ -788,8 +793,29 @@ async function reverseGeocode(lat, lon) {
   } catch { return 'En route'; }
 }
 
-// ── OSRM Route ────────────────────────────────────────────
-async function getRoute(from, to) {
+// ── Routing ───────────────────────────────────────────────
+// Tries Mapbox (traffic-aware, accurate) when a token is present.
+// Falls back to OSRM (free, no key, ~25% slower estimates).
+
+async function getRouteMapbox(from, to, token) {
+  // driving-traffic profile uses real-time traffic when departure_time is "now"
+  const coords = `${from.lon},${from.lat};${to.lon},${to.lat}`;
+  const url = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coords}`
+    + `?access_token=${token}&geometries=geojson&overview=full&annotations=duration,distance`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('Mapbox routing failed (HTTP ' + r.status + ')');
+  const j = await r.json();
+  if (!j.routes || !j.routes.length) throw new Error('Mapbox: no route found.');
+  const route = j.routes[0];
+  return {
+    distanceM: route.distance,
+    durationS: route.duration,
+    coords: route.geometry.coordinates,
+    source: 'mapbox',
+  };
+}
+
+async function getRouteOSRM(from, to) {
   const url = `https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson`;
   const r = await fetch(url);
   const j = await r.json();
@@ -798,8 +824,20 @@ async function getRoute(from, to) {
   return {
     distanceM: route.distance,
     durationS: route.duration,
-    coords: route.geometry.coordinates // [lon, lat]
+    coords: route.geometry.coordinates,
+    source: 'osrm',
   };
+}
+
+async function getRoute(from, to) {
+  if (mapboxToken) {
+    try {
+      return await getRouteMapbox(from, to, mapboxToken);
+    } catch (e) {
+      console.warn('[routing] Mapbox failed, falling back to OSRM:', e.message);
+    }
+  }
+  return await getRouteOSRM(from, to);
 }
 
 // ── Sample waypoints along route ─────────────────────────
@@ -993,7 +1031,7 @@ async function run() {
     ]);
 
     // 2. Route
-    setStatus('Fetching route via OSRM…');
+    setStatus(mapboxToken ? 'Fetching route via Mapbox (traffic-aware)…' : 'Fetching route via OSRM…');
     const route = await getRoute(fromGeo, toGeo);
     const { distanceM, durationS, coords } = route;
 
@@ -1039,6 +1077,7 @@ async function run() {
     document.getElementById('rTime').textContent = fmtDur(durationS);
     document.getElementById('rDepart').textContent = fmtTime(departTime);
     document.getElementById('rArrive').textContent = fmtTime(waypoints[waypoints.length-1].time);
+    document.getElementById('rSource').textContent = route.source === 'mapbox' ? '🗺 Mapbox (traffic)' : 'OSRM (no traffic)';
     document.getElementById('routeBar').classList.add('show');
     document.getElementById('shareRow').style.display = 'flex';
 
