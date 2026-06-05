@@ -6,6 +6,8 @@
 <title>RouteWeather — Weather Along Your Drive</title>
 <meta name="description" content="Check weather at every waypoint along your drive, timed to when you'll actually be there. Free route weather planner." />
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -553,6 +555,116 @@
   }
   .geo-suggest span { text-decoration: underline; cursor: pointer; }
 
+  /* Card clickable hint */
+  .wp-card { cursor: pointer; transition: background 0.15s, border-color 0.12s; }
+  .wp-card:hover { background: var(--surface2); border-color: rgba(255,255,255,0.13); }
+  .radar-hint {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--muted);
+    margin-top: 5px;
+    letter-spacing: 0.06em;
+  }
+
+  /* Radar modal */
+  .radar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    backdrop-filter: blur(6px);
+  }
+  .radar-modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    width: 100%;
+    max-width: 500px;
+    overflow: hidden;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+  }
+  .radar-modal-header {
+    padding: 16px 20px 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 1px solid var(--border);
+  }
+  .radar-modal-title { font-weight: 700; font-size: 15px; }
+  .radar-modal-sub {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 3px;
+  }
+  .radar-close-btn {
+    background: none; border: none;
+    color: var(--muted); font-size: 24px;
+    cursor: pointer; line-height: 1; padding: 0 4px; margin-top: -2px;
+  }
+  .radar-close-btn:hover { color: var(--text); }
+  #radarMapEl { width: 100%; height: 300px; }
+  .radar-modal-footer {
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    border-top: 1px solid var(--border);
+  }
+  .radar-frame-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    min-width: 0;
+    flex: 1;
+  }
+  .radar-dots {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .rdot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--border);
+    cursor: pointer;
+    transition: background 0.1s, transform 0.1s;
+    flex-shrink: 0;
+  }
+  .rdot:hover { transform: scale(1.3); }
+  .rdot.active { background: #a0b4d0; }
+  .rdot.is-target { background: var(--accent2) !important; width: 10px; height: 10px; }
+  .rdot.is-target.active { box-shadow: 0 0 0 2px rgba(240,166,74,0.4); }
+  .radar-play-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 4px 12px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .radar-play-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .radar-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 300px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    gap: 10px;
+  }
+
   /* connector line between cards */
   .connector {
     width: 2px;
@@ -653,7 +765,29 @@
   <div class="msg-box" id="msgBox"></div>
   <div class="timeline" id="timeline"></div>
 
-  <div class="attrib">Weather: Open-Meteo.com · Routing: OSRM · Geocoding: Nominatim/OSM</div>
+  <div class="attrib">Weather: Open-Meteo.com · Routing: OSRM / Mapbox · Geocoding: Nominatim/OSM · Radar: RainViewer</div>
+</div>
+
+<!-- Radar modal -->
+<div class="radar-overlay" id="radarOverlay" style="display:none" onclick="handleOverlayClick(event)">
+  <div class="radar-modal" id="radarModal">
+    <div class="radar-modal-header">
+      <div>
+        <div class="radar-modal-title" id="radarModalTitle">Radar</div>
+        <div class="radar-modal-sub" id="radarModalSub"></div>
+      </div>
+      <button class="radar-close-btn" onclick="closeRadarModal()">×</button>
+    </div>
+    <div id="radarMapEl"></div>
+    <div class="radar-loading" id="radarLoading" style="display:none">
+      <div class="spinner"></div><span>Loading radar…</span>
+    </div>
+    <div class="radar-modal-footer">
+      <div class="radar-frame-label" id="radarFrameLabel">—</div>
+      <div class="radar-dots" id="radarDots"></div>
+      <button class="radar-play-btn" id="radarPlayBtn" onclick="toggleRadarPlay()">⏸ Pause</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -979,6 +1113,7 @@ function renderCard(wp, i, total, delay) {
   const card = document.createElement('div');
   card.className = `wp-card dc-${dc.cls}`;
   card.style.animationDelay = `${delay}ms`;
+  card.addEventListener('click', () => openRadarModal(wp));
 
   card.innerHTML = `
     <div class="wp-time">
@@ -990,6 +1125,7 @@ function renderCard(wp, i, total, delay) {
       <div class="wp-coords">${wp.lat.toFixed(4)}, ${wp.lon.toFixed(4)}</div>
       ${alertHtml}
       <div class="dc-badge ${dc.cls}">${dc.label}</div>
+      <div class="radar-hint">📡 tap for radar</div>
     </div>
     <div class="wp-weather">
       <div class="wp-temp ${wmo.cls}">${wmo.icon} ${wp.weather.temp}°F</div>
@@ -1107,8 +1243,149 @@ async function run() {
 
 // Enter key
 document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeRadarModal();
   if (e.key === 'Enter' && (e.target.id === 'origin' || e.target.id === 'dest')) run();
 });
+
+// ── Radar Modal ───────────────────────────────────────────
+let _radarMap      = null;
+let _radarTile     = null;
+let _radarFrames   = [];
+let _radarIdx      = 0;
+let _radarTimer    = null;
+let _radarPlaying  = true;
+let _radarMarker   = null;
+
+function handleOverlayClick(e) {
+  if (e.target === document.getElementById('radarOverlay')) closeRadarModal();
+}
+
+async function openRadarModal(wp) {
+  const overlay = document.getElementById('radarOverlay');
+  overlay.style.display = 'flex';
+
+  document.getElementById('radarModalTitle').textContent = wp.name;
+  document.getElementById('radarModalSub').textContent =
+    `You'll be here at ${fmtTime(wp.time)} · ${wp.weather.temp}°F · ${decodeWMO(wp.weather.code).desc}`;
+  document.getElementById('radarFrameLabel').textContent = 'Loading radar…';
+  document.getElementById('radarDots').innerHTML = '';
+  document.getElementById('radarLoading').style.display = 'none';
+
+  // Init Leaflet map once; reuse after
+  const mapEl = document.getElementById('radarMapEl');
+  if (!_radarMap) {
+    mapEl.style.display = 'block';
+    _radarMap = L.map(mapEl, { zoomControl: true, attributionControl: false });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      subdomains: 'abcd', maxZoom: 12,
+    }).addTo(_radarMap);
+  } else {
+    mapEl.style.display = 'block';
+    document.getElementById('radarLoading').style.display = 'none';
+  }
+
+  _radarMap.setView([wp.lat, wp.lon], 7);
+  setTimeout(() => _radarMap && _radarMap.invalidateSize(), 80);
+
+  // Replace marker
+  if (_radarMarker) _radarMap.removeLayer(_radarMarker);
+  _radarMarker = L.circleMarker([wp.lat, wp.lon], {
+    radius: 9, color: '#4af0c4', fillColor: '#4af0c4',
+    fillOpacity: 0.85, weight: 2,
+  }).addTo(_radarMap).bindTooltip(wp.name, { permanent: true, direction: 'top', offset: [0, -8] });
+
+  clearInterval(_radarTimer);
+  await loadRainViewer(wp.time);
+}
+
+async function loadRainViewer(targetTime) {
+  try {
+    const resp = await fetch('https://api.rainviewer.com/public/weather-maps.json');
+    const data = await resp.json();
+    const host   = data.host || 'https://tilecache.rainviewer.com';
+    const past    = (data.radar && data.radar.past)    || [];
+    const nowcast = (data.radar && data.radar.nowcast) || [];
+    const all = [...past, ...nowcast];
+
+    if (!all.length) {
+      document.getElementById('radarFrameLabel').textContent = 'No radar data available.';
+      return;
+    }
+
+    _radarFrames = all.map(f => ({ ms: f.time * 1000, path: f.path, host }));
+
+    // Find frame closest to the waypoint ETA
+    const targetMs = targetTime.getTime();
+    let closestIdx = 0, minDiff = Infinity;
+    _radarFrames.forEach((f, i) => {
+      const d = Math.abs(f.ms - targetMs);
+      if (d < minDiff) { minDiff = d; closestIdx = i; }
+    });
+
+    // Build timeline dots
+    const dotsEl = document.getElementById('radarDots');
+    dotsEl.innerHTML = _radarFrames.map((f, i) => {
+      const cls = i === closestIdx ? 'rdot is-target' : 'rdot';
+      const label = new Date(f.ms).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
+                  + (i === closestIdx ? ' ← your ETA' : '');
+      return `<div class="${cls}" title="${label}" onclick="jumpToFrame(${i})"></div>`;
+    }).join('');
+
+    // Start from a few frames before the closest so the animation leads up to ETA
+    _radarIdx = Math.max(0, closestIdx - 3);
+    _radarPlaying = true;
+    document.getElementById('radarPlayBtn').textContent = '⏸ Pause';
+
+    showFrame(_radarIdx);
+
+    clearInterval(_radarTimer);
+    _radarTimer = setInterval(() => {
+      if (!_radarPlaying) return;
+      _radarIdx = (_radarIdx + 1) % _radarFrames.length;
+      showFrame(_radarIdx);
+    }, 650);
+
+  } catch(e) {
+    document.getElementById('radarFrameLabel').textContent = 'Radar unavailable — ' + e.message;
+  }
+}
+
+function showFrame(idx) {
+  if (!_radarMap || !_radarFrames.length) return;
+  const f = _radarFrames[idx];
+
+  if (_radarTile) { _radarMap.removeLayer(_radarTile); _radarTile = null; }
+  _radarTile = L.tileLayer(`${f.host}${f.path}/{z}/{x}/{y}/2/1_1.png`, {
+    opacity: 0.65, maxZoom: 12, tileSize: 256,
+  }).addTo(_radarMap);
+
+  // Highlight active dot
+  document.querySelectorAll('.rdot').forEach((d, i) => {
+    d.classList.toggle('active', i === idx);
+  });
+
+  const t = new Date(f.ms);
+  const isFuture = f.ms > Date.now();
+  const label = isFuture ? '📡 Forecast' : '🛰 Radar';
+  document.getElementById('radarFrameLabel').textContent =
+    `${label}: ${fmtTime(t)} ${fmtDate(t)}`;
+}
+
+function jumpToFrame(idx) {
+  _radarIdx = idx;
+  showFrame(idx);
+}
+
+function toggleRadarPlay() {
+  _radarPlaying = !_radarPlaying;
+  document.getElementById('radarPlayBtn').textContent = _radarPlaying ? '⏸ Pause' : '▶ Play';
+}
+
+function closeRadarModal() {
+  document.getElementById('radarOverlay').style.display = 'none';
+  clearInterval(_radarTimer);
+  _radarPlaying = false;
+}
 </script>
 </body>
 </html>
