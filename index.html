@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Route Weather</title>
+<title>RouteWeather — Weather Along Your Drive</title>
+<meta name="description" content="Check weather at every waypoint along your drive, timed to when you'll actually be there. Free route weather planner." />
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -323,6 +324,77 @@
   .msg-box.show { display: block; }
   .msg-box.error { border-color: rgba(240,90,74,0.25); color: var(--danger); }
 
+  /* Pro CTA */
+  .pro-btn {
+    background: transparent;
+    border: 1px solid rgba(240,166,74,0.4);
+    border-radius: 8px;
+    color: var(--accent2);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 6px 14px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .pro-btn:hover { background: rgba(240,166,74,0.08); border-color: var(--accent2); }
+
+  /* Share button */
+  .share-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 6px 12px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .share-btn:hover { color: var(--text); border-color: rgba(255,255,255,0.2); }
+
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 20px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    opacity: 0;
+    transition: opacity 0.2s, transform 0.2s;
+    pointer-events: none;
+    z-index: 100;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* Ad banner */
+  .ad-banner {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 20px;
+    margin-bottom: 20px;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    min-height: 80px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+  .ad-banner.show { display: flex; }
+  /* Replace the inner content with real AdSense when approved */
+
   /* Attribution */
   .attrib {
     font-family: var(--mono);
@@ -404,10 +476,11 @@
 
   <header>
     <div class="logo-mark">🗺️</div>
-    <div>
+    <div style="flex:1">
       <h1>Route<span>Weather</span></h1>
       <div class="subtitle">// weather along your drive · timed to your arrival</div>
     </div>
+    <a href="https://tally.so/r/routeweather-pro" target="_blank" class="pro-btn">⚡ Go Pro — free early access</a>
   </header>
 
   <!-- API Key notice -->
@@ -463,6 +536,18 @@
     <div class="rstat"><div class="rstat-label">Arrival</div><div class="rstat-val" id="rArrive">—</div></div>
   </div>
 
+  <!-- Ad banner — replace inner content with AdSense script when approved -->
+  <div class="ad-banner" id="adBanner">
+    <!-- ADSENSE_PLACEHOLDER -->
+    <span style="opacity:.4">advertisement</span>
+  </div>
+
+  <!-- Share row — shown after route loads -->
+  <div id="shareRow" style="display:none;justify-content:flex-end;margin-bottom:12px;">
+    <button class="share-btn" onclick="copyShareLink()">🔗 Copy share link</button>
+  </div>
+
+  <div class="toast" id="toast"></div>
   <div class="msg-box" id="msgBox"></div>
   <div class="timeline" id="timeline"></div>
 
@@ -473,6 +558,38 @@
 // ── State ─────────────────────────────────────────────────
 let owmKey = localStorage.getItem('owmKey') || '';
 if(owmKey) document.getElementById('owmKey').value = owmKey;
+
+// Pro status (Phase 3 will verify server-side; for now localStorage flag)
+const isPro = localStorage.getItem('routeWeatherPro') === 'valid';
+if (!isPro) document.getElementById('adBanner').classList.add('show');
+
+// ── URL param hydration ───────────────────────────────────
+(function hydrateFromURL() {
+  const p = new URLSearchParams(location.search);
+  if (p.get('from')) document.getElementById('origin').value = p.get('from');
+  if (p.get('to'))   document.getElementById('dest').value   = p.get('to');
+  if (p.get('depart')) document.getElementById('depart').value = p.get('depart');
+  if (p.get('density')) document.getElementById('density').value = p.get('density');
+})();
+
+// ── Share link ────────────────────────────────────────────
+function updateShareURL(from, to, depart, density) {
+  const p = new URLSearchParams({ from, to, depart, density });
+  const url = location.origin + location.pathname + '?' + p.toString();
+  history.replaceState(null, '', '?' + p.toString());
+  return url;
+}
+
+function copyShareLink() {
+  navigator.clipboard.writeText(location.href).then(() => showToast('Link copied ✓'));
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
 
 function saveKey() {
   owmKey = document.getElementById('owmKey').value.trim();
@@ -659,6 +776,7 @@ async function run() {
   const dest   = document.getElementById('dest').value.trim();
   const departVal = document.getElementById('depart').value;
   const n = parseInt(document.getElementById('density').value);
+  updateShareURL(origin, dest, departVal, n);
 
   if (!origin || !dest) { showMsg('Please enter origin and destination.', true); return; }
   if (!departVal) { showMsg('Please choose a departure time.', true); return; }
@@ -723,6 +841,7 @@ async function run() {
     document.getElementById('rDepart').textContent = fmtTime(departTime);
     document.getElementById('rArrive').textContent = fmtTime(waypoints[waypoints.length-1].time);
     document.getElementById('routeBar').classList.add('show');
+    document.getElementById('shareRow').style.display = 'flex';
 
     const tl = document.getElementById('timeline');
     waypoints.forEach((wp, i) => {
