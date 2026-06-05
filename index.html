@@ -461,6 +461,98 @@
     color: var(--muted);
   }
 
+  /* Drive summary insight card */
+  .summary-card {
+    border-radius: 16px;
+    padding: 20px 24px;
+    margin-bottom: 20px;
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    border: 1px solid;
+  }
+  .summary-card.show { display: flex; }
+  .summary-card.clear  { background: rgba(74,240,196,0.06); border-color: rgba(74,240,196,0.2); }
+  .summary-card.watch  { background: rgba(74,144,240,0.06); border-color: rgba(74,144,240,0.25); }
+  .summary-card.warn   { background: rgba(240,212,74,0.07); border-color: rgba(240,212,74,0.25); }
+  .summary-card.danger { background: rgba(240,90,74,0.07);  border-color: rgba(240,90,74,0.3); }
+
+  .summary-verdict {
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+  }
+  .summary-card.clear  .summary-verdict { color: var(--accent); }
+  .summary-card.watch  .summary-verdict { color: #4a90f0; }
+  .summary-card.warn   .summary-verdict { color: var(--warn); }
+  .summary-card.danger .summary-verdict { color: var(--danger); }
+
+  .summary-advice {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text);
+    line-height: 1.6;
+  }
+  .summary-trend {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .summary-pills {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+  }
+  .pill {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .pill.hot   { color: #f0904a; border-color: rgba(240,144,74,0.3); }
+  .pill.rain  { color: #4a90f0; border-color: rgba(74,144,240,0.3); }
+  .pill.wind  { color: #a0b4d0; border-color: rgba(160,180,208,0.3); }
+  .pill.storm { color: var(--danger); border-color: rgba(240,90,74,0.4); }
+  .pill.clear { color: var(--accent); border-color: rgba(74,240,196,0.3); }
+
+  /* Driving conditions left border on cards */
+  .wp-card { border-left: 3px solid var(--border); }
+  .wp-card.dc-excellent { border-left-color: #4af0c4; }
+  .wp-card.dc-good      { border-left-color: #a0d080; }
+  .wp-card.dc-caution   { border-left-color: #f0d44a; }
+  .wp-card.dc-dangerous { border-left-color: #f05a4a; }
+
+  .dc-badge {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 4px;
+    margin-top: 5px;
+    display: inline-block;
+  }
+  .dc-badge.excellent { background: rgba(74,240,196,0.1); color: #4af0c4; }
+  .dc-badge.good      { background: rgba(160,208,128,0.1); color: #a0d080; }
+  .dc-badge.caution   { background: rgba(240,212,74,0.1);  color: #f0d44a; }
+  .dc-badge.dangerous { background: rgba(240,90,74,0.12);  color: #f05a4a; }
+
+  /* Geocode suggestions */
+  .geo-suggest {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent2);
+    margin-top: -10px;
+    margin-bottom: 10px;
+    padding-left: 4px;
+    cursor: pointer;
+  }
+  .geo-suggest span { text-decoration: underline; cursor: pointer; }
+
   /* connector line between cards */
   .connector {
     width: 2px;
@@ -498,13 +590,15 @@
     <div class="field-row">
       <div class="field">
         <label>From</label>
-        <input type="text" id="origin" placeholder="Wimberley, TX" />
+        <input type="text" id="origin" placeholder="Rosenberg, TX" autocomplete="off" />
       </div>
       <div class="field">
         <label>To</label>
-        <input type="text" id="dest" placeholder="Austin, TX" />
+        <input type="text" id="dest" placeholder="New Orleans, LA" autocomplete="off" />
       </div>
     </div>
+    <div id="originSuggest" class="geo-suggest" style="display:none"></div>
+    <div id="destSuggest"   class="geo-suggest" style="display:none"></div>
     <div class="field-row">
       <div class="field">
         <label>Depart</label>
@@ -514,8 +608,8 @@
         <label>Waypoint density</label>
         <select id="density">
           <option value="3">Light (3 stops)</option>
-          <option value="5" selected>Normal (5 stops)</option>
-          <option value="8">Detailed (8 stops)</option>
+          <option value="5">Normal (5 stops)</option>
+          <option value="8" selected>Detailed (8 stops)</option>
           <option value="12">Max (12 stops)</option>
         </select>
       </div>
@@ -534,6 +628,14 @@
     <div class="rstat"><div class="rstat-label">Est. drive time</div><div class="rstat-val" id="rTime">—</div></div>
     <div class="rstat"><div class="rstat-label">Departure</div><div class="rstat-val" id="rDepart">—</div></div>
     <div class="rstat"><div class="rstat-label">Arrival</div><div class="rstat-val" id="rArrive">—</div></div>
+  </div>
+
+  <!-- Drive summary insight card -->
+  <div class="summary-card" id="summaryCard">
+    <div class="summary-verdict" id="summaryVerdict"></div>
+    <div class="summary-advice" id="summaryAdvice"></div>
+    <div class="summary-trend" id="summaryTrend"></div>
+    <div class="summary-pills" id="summaryPills"></div>
   </div>
 
   <!-- Ad banner — replace inner content with AdSense script when approved -->
@@ -638,13 +740,42 @@ function fmtDist(meters) {
   return miles >= 10 ? `${Math.round(miles)} mi` : `${miles.toFixed(1)} mi`;
 }
 
-// ── Geocode ───────────────────────────────────────────────
-async function geocode(place) {
-  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(place)}&format=json&limit=1`;
+// ── Geocode with suggestions ──────────────────────────────
+async function geocode(place, suggestElId) {
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(place)}&format=json&limit=5&addressdetails=1`;
   const r = await fetch(url, {headers:{'Accept-Language':'en'}});
   const j = await r.json();
-  if (!j.length) throw new Error(`Could not find "${place}"`);
-  return { lat: parseFloat(j[0].lat), lon: parseFloat(j[0].lon), name: j[0].display_name.split(',').slice(0,2).join(', ') };
+
+  // Hide old suggestions
+  if (suggestElId) document.getElementById(suggestElId).style.display = 'none';
+
+  if (!j.length) {
+    // Hint the user how to format
+    const hint = `No results for "${place}". Try: "New Orleans, LA" or "New Orleans, Louisiana"`;
+    throw new Error(hint);
+  }
+
+  const best = j[0];
+  // If there are alternates, show a subtle "Did you mean?" link
+  if (suggestElId && j.length > 1) {
+    const alt = j[1].display_name.split(',').slice(0,3).join(',');
+    const el = document.getElementById(suggestElId);
+    el.innerHTML = `Did you mean: <span onclick="useSuggestion('${suggestElId}','${alt.replace(/'/g,"&#39;")}')">${alt}</span>?`;
+    el.style.display = 'block';
+  }
+
+  return {
+    lat: parseFloat(best.lat),
+    lon: parseFloat(best.lon),
+    name: best.display_name.split(',').slice(0,2).join(', '),
+  };
+}
+
+function useSuggestion(suggestElId, val) {
+  const inputId = suggestElId === 'originSuggest' ? 'origin' : 'dest';
+  document.getElementById(inputId).value = val;
+  document.getElementById(suggestElId).style.display = 'none';
+  run();
 }
 
 // ── Reverse geocode ───────────────────────────────────────
@@ -728,6 +859,69 @@ function alertLevel(w) {
   return null;
 }
 
+function drivingConditions(w) {
+  if (w.code >= 95 || w.wind >= 50)           return { label: 'Dangerous',  cls: 'dangerous' };
+  if (w.code >= 67 || w.precip >= 70 || w.wind >= 35) return { label: 'Caution', cls: 'caution' };
+  if (w.code >= 51 || w.precip >= 40 || w.wind >= 20) return { label: 'Good',    cls: 'good' };
+  return                                              { label: 'Excellent', cls: 'excellent' };
+}
+
+function buildDriveSummary(waypoints) {
+  const weathers = waypoints.map(wp => wp.weather);
+  const maxPrecip  = Math.max(...weathers.map(w => w.precip));
+  const maxWind    = Math.max(...weathers.map(w => w.wind));
+  const maxTemp    = Math.max(...weathers.map(w => w.temp));
+  const minTemp    = Math.min(...weathers.map(w => w.temp));
+  const hasStorm   = weathers.some(w => w.code >= 95);
+  const hasHvyRain = weathers.some(w => w.code >= 67 || w.precip >= 70);
+  const hasRain    = weathers.some(w => w.precip >= 35);
+  const firstP     = weathers[0].precip;
+  const lastP      = weathers[weathers.length - 1].precip;
+  const worstWp    = waypoints.reduce((a, b) => b.weather.precip > a.weather.precip ? b : a);
+
+  // Verdict + advice
+  let verdict, cls, advice;
+  if (hasStorm) {
+    verdict = '⛈ Storm risk on this route'; cls = 'danger';
+    advice  = `Severe weather likely near ${worstWp.name}. Consider departing later or checking alternate routes.`;
+  } else if (hasHvyRain) {
+    verdict = '🌧 Heavy rain expected'; cls = 'warn';
+    advice  = `Rain most likely near ${worstWp.name} (${worstWp.weather.precip}% chance). Allow extra time, reduce speed, keep wipers ready.`;
+  } else if (hasRain) {
+    verdict = '🌦 Light rain possible'; cls = 'watch';
+    advice  = `Up to ${maxPrecip}% rain chance near ${worstWp.name}. Mostly manageable — pack an umbrella just in case.`;
+  } else {
+    verdict = '✅ Good driving conditions'; cls = 'clear';
+    advice  = 'No significant weather expected along your route. Smooth trip ahead.';
+  }
+
+  // Trend
+  let trend = '';
+  if (firstP - lastP >= 20) trend = 'Rain clears up as you approach your destination.';
+  else if (lastP - firstP >= 20) trend = 'Weather gets worse toward your destination — check again before arrival.';
+
+  // Pills
+  const pills = [];
+  if (hasStorm)      pills.push({ text: '⛈ Thunderstorms', cls: 'storm' });
+  else if (hasRain)  pills.push({ text: `🌧 ${maxPrecip}% rain`, cls: 'rain' });
+  if (maxWind >= 25) pills.push({ text: `💨 ${maxWind}mph gusts`, cls: 'wind' });
+  if (maxTemp >= 95) pills.push({ text: `🌡 ${maxTemp}°F heat`, cls: 'hot' });
+  if (cls === 'clear') pills.push({ text: '☀️ Clear skies', cls: 'clear' });
+
+  return { verdict, cls, advice, trend, pills };
+}
+
+function renderSummary(waypoints) {
+  const s = buildDriveSummary(waypoints);
+  const card = document.getElementById('summaryCard');
+  card.className = 'summary-card show ' + s.cls;
+  document.getElementById('summaryVerdict').textContent = s.verdict;
+  document.getElementById('summaryAdvice').textContent  = s.advice;
+  document.getElementById('summaryTrend').textContent   = s.trend;
+  const pillsEl = document.getElementById('summaryPills');
+  pillsEl.innerHTML = s.pills.map(p => `<span class="pill ${p.cls}">${p.text}</span>`).join('');
+}
+
 // ── Render card ───────────────────────────────────────────
 function renderCard(wp, i, total, delay) {
   const isFirst = i === 0, isLast = i === total-1;
@@ -743,8 +937,9 @@ function renderCard(wp, i, total, delay) {
     ? `<div class="alert-badge warn-badge">⚡ Rain likely — ${wp.weather.precip}% chance</div>`
     : '';
 
+  const dc = drivingConditions(wp.weather);
   const card = document.createElement('div');
-  card.className = 'wp-card';
+  card.className = `wp-card dc-${dc.cls}`;
   card.style.animationDelay = `${delay}ms`;
 
   card.innerHTML = `
@@ -756,6 +951,7 @@ function renderCard(wp, i, total, delay) {
       <div class="wp-name">${isFirst ? '🚀 ' : isLast ? '🏁 ' : '📍 '}${wp.name}</div>
       <div class="wp-coords">${wp.lat.toFixed(4)}, ${wp.lon.toFixed(4)}</div>
       ${alertHtml}
+      <div class="dc-badge ${dc.cls}">${dc.label}</div>
     </div>
     <div class="wp-weather">
       <div class="wp-temp ${wmo.cls}">${wmo.icon} ${wp.weather.temp}°F</div>
@@ -791,7 +987,10 @@ async function run() {
   try {
     // 1. Geocode
     setStatus('Geocoding addresses…');
-    const [fromGeo, toGeo] = await Promise.all([geocode(origin), geocode(dest)]);
+    const [fromGeo, toGeo] = await Promise.all([
+      geocode(origin, 'originSuggest'),
+      geocode(dest,   'destSuggest'),
+    ]);
 
     // 2. Route
     setStatus('Fetching route via OSRM…');
@@ -846,6 +1045,11 @@ async function run() {
     const tl = document.getElementById('timeline');
     waypoints.forEach((wp, i) => {
       wp.weather = weathers[i];
+    });
+
+    renderSummary(waypoints);
+
+    waypoints.forEach((wp, i) => {
       if (i > 0) {
         const conn = document.createElement('div');
         conn.className = 'connector';
